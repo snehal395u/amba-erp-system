@@ -43,4 +43,3 @@ def me(token: str = Depends(oauth2_scheme)):
         return {"username": payload.get("sub")}
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
-s
