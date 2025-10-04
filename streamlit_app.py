@@ -1,10 +1,13 @@
-# streamlit_app.py
+# streamlit_app.py - Professional, colorful, and interactive ERP Prototype
 import streamlit as st
 import pandas as pd
 import datetime
 import os
 import uuid
 
+# -------------------------
+# Helper function for SQL escaping
+# -------------------------
 def sql_escape(val):
     if val is None:
         return "NULL"
@@ -15,9 +18,21 @@ def sql_escape(val):
     s = str(val).replace("'", "''")
     return f"'{s}'"
 
-st.set_page_config(page_title="ERP Prototype - Inventory & Order Form", layout="wide")
-st.title("ERP Prototype — Inventory List & Order Form")
+# -------------------------
+# Page config
+# -------------------------
+st.set_page_config(page_title="ERP Prototype", layout="wide", page_icon="📦")
 
+# -------------------------
+# Title & Intro
+# -------------------------
+st.markdown("<h1 style='text-align:center;color:#4F81BD;'>📦 ERP Prototype — Inventory & Orders</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:#6E6E6E;'>Professional ERP prototype with colorful UI and interactive order form.</p>", unsafe_allow_html=True)
+st.markdown("---")
+
+# -------------------------
+# Load Products
+# -------------------------
 EXCEL_PATH = "management_report.xlsx"
 if os.path.exists(EXCEL_PATH):
     try:
@@ -39,15 +54,39 @@ df_products['id'] = df_products['id'].astype(int)
 df_products['current_stock'] = df_products['current_stock'].astype(int)
 df_products['price'] = df_products['price'].astype(float)
 
+# -------------------------
+# Layout Columns
+# -------------------------
 col1, col2 = st.columns([2, 3])
-with col1:
-    st.header("Inventory")
-    st.markdown("Inventory loaded from `management_report.xlsx` if present, otherwise sample data.")
-    st.dataframe(df_products.style.format({"price": "{:.2f}"}), height=400)
-    st.markdown(f"Total SKUs: **{len(df_products)}**")
 
+# -------------------------
+# Inventory Display
+# -------------------------
+with col1:
+    st.markdown("### 🏭 Inventory")
+    st.markdown("Inventory loaded from `management_report.xlsx` if present, otherwise sample data.")
+    
+    # Conditional formatting for stock levels
+    def highlight_stock(val, reorder):
+        color = "#D32F2F" if val <= reorder else "#388E3C"
+        return f'background-color: {color}; color:white; font-weight:bold;'
+    
+    st.dataframe(
+        df_products.style.apply(lambda x: [highlight_stock(v, x.reorder_level) if isinstance(v,int) else "" for v in x], axis=1)
+                 .format({"price": "₹{:.2f}"}), height=400
+    )
+    
+    # Metrics
+    total_skus = len(df_products)
+    total_stock = df_products['current_stock'].sum()
+    st.metric("Total SKUs", total_skus)
+    st.metric("Total Inventory Units", total_stock)
+
+# -------------------------
+# Order Form
+# -------------------------
 with col2:
-    st.header("Create New Sales Order")
+    st.markdown("### 📝 Create New Sales Order")
     sample_customers = [
         {"id": 1, "name": "Amba Distributors"},
         {"id": 2, "name": "TransCo Pvt Ltd"},
@@ -56,14 +95,15 @@ with col2:
     cust_options = {c['name']: c['id'] for c in sample_customers}
 
     with st.form("order_form", clear_on_submit=False):
-        order_number = st.text_input("Order Number (e.g. ORD-2025-0001)", value=f"ORD-{datetime.date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}")
+        order_number = st.text_input("Order Number", value=f"ORD-{datetime.date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}")
         customer_name = st.selectbox("Customer", options=list(cust_options.keys()))
         order_date = st.date_input("Order Date", value=datetime.date.today())
         created_by = st.text_input("Created by", value="operator")
         num_lines = st.number_input("Number of lines", min_value=1, max_value=10, value=1)
 
+        # Order lines
         lines = []
-        st.markdown("### Order lines")
+        st.markdown("#### Order lines")
         for i in range(int(num_lines)):
             st.markdown(f"**Line {i+1}**")
             col_a, col_b, col_c = st.columns([3, 1, 1])
@@ -73,7 +113,7 @@ with col2:
                 qty = st.number_input(f"Qty (line {i+1})", min_value=1, value=1, key=f"qty_{i}")
             with col_c:
                 price = float(df_products.loc[df_products['name'] == product_choice, 'price'].iloc[0])
-                st.markdown(f"Unit price: **{price:.2f}**")
+                st.markdown(f"Unit price: **₹{price:.2f}**")
             prod_row = df_products[df_products['name'] == product_choice].iloc[0]
             lines.append({
                 "product_id": int(prod_row['id']),
@@ -82,8 +122,11 @@ with col2:
                 "unit_price": float(price)
             })
 
-        submitted = st.form_submit_button("Validate & Generate SQL INSERT")
+        submitted = st.form_submit_button("✅ Validate & Generate SQL")
 
+    # -------------------------
+    # Validation & SQL Generation
+    # -------------------------
     if submitted:
         errors = []
         if not order_number.strip():
@@ -100,6 +143,12 @@ with col2:
             st.error("Validation errors:\n- " + "\n- ".join(errors))
         else:
             total_amount = sum([li['qty'] * li['unit_price'] for li in lines])
+            
+            st.balloons()  # 🎉 Celebration effect
+
+            st.success(f"Validation passed — total = ₹{total_amount:.2f}")
+            
+            # Generate SQL statements
             order_values = {
                 "order_number": order_number,
                 "customer_id": cust_options[customer_name],
@@ -110,13 +159,12 @@ with col2:
             }
 
             cols = ["order_number", "customer_id", "order_date", "total_amount", "status", "created_by"]
-            cols_sql = ", ".join(cols)
             vals_sql = ", ".join([sql_escape(order_values[c]) for c in cols])
-            insert_order_sql = f"INSERT INTO orders ({cols_sql}) VALUES ({vals_sql});"
+            insert_order_sql = f"INSERT INTO orders ({', '.join(cols)}) VALUES ({vals_sql});"
             st.markdown("### Generated SQL")
             st.code(insert_order_sql)
 
-            st.markdown("#### Order lines (inserts for order_items)")
+            st.markdown("#### Order lines inserts")
             for li in lines:
                 li_cols = ["order_id", "product_id", "qty", "unit_price", "line_total"]
                 line_total = li['qty'] * li['unit_price']
@@ -130,8 +178,8 @@ with col2:
                 sql_line = f"INSERT INTO order_items ({', '.join(li_cols)}) VALUES ({', '.join(li_vals)});"
                 st.code(sql_line)
 
-            st.success(f"Validation passed — total = {total_amount:.2f}. SQL statements generated above.")
-            st.info("Note: In a real DB transaction, you'd INSERT the orders row, get its id, then INSERT order_items, and update the products table and inventory_log.")
-
+# -------------------------
+# Footer
+# -------------------------
 st.markdown("---")
-st.markdown("**Developer notes:** This prototype prints SQL insert statements only (no DB connection). For a production backend, implement an API endpoint that performs the transactional logic described in the architecture doc.")
+st.markdown("<p style='text-align:center;color:#6E6E6E;'>This prototype prints SQL only. In production, integrate with API & transactional DB.</p>", unsafe_allow_html=True)
