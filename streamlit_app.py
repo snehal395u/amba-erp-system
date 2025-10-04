@@ -21,12 +21,12 @@ def sql_escape(val):
 # -------------------------
 # Page config
 # -------------------------
-st.set_page_config(page_title="ERP Prototype", layout="wide", page_icon="📦")
+st.set_page_config(page_title="ERP Prototype", layout="wide")
 
 # -------------------------
 # Title & Intro
 # -------------------------
-st.markdown("<h1 style='text-align:center;color:#4F81BD;'>📦 ERP Prototype — Inventory & Orders</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align:center;color:#4F81BD;'> ERP Prototype — Inventory & Orders</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center;color:#6E6E6E;'>Professional ERP prototype with colorful UI and interactive order form.</p>", unsafe_allow_html=True)
 st.markdown("---")
 
@@ -63,7 +63,7 @@ col1, col2 = st.columns([2, 3])
 # Inventory Display
 # -------------------------
 with col1:
-    st.markdown("### 🏭 Inventory")
+    st.markdown("Inventory")
     st.markdown("Inventory loaded from `management_report.xlsx` if present, otherwise sample data.")
     
     # Conditional formatting for stock levels
@@ -86,7 +86,7 @@ with col1:
 # Order Form
 # -------------------------
 with col2:
-    st.markdown("### 📝 Create New Sales Order")
+    st.markdown("Create New Sales Order")
     sample_customers = [
         {"id": 1, "name": "Amba Distributors"},
         {"id": 2, "name": "TransCo Pvt Ltd"},
@@ -122,7 +122,7 @@ with col2:
                 "unit_price": float(price)
             })
 
-        submitted = st.form_submit_button("✅ Validate & Generate SQL")
+        submitted = st.form_submit_button("Validate & Generate ")
 
     # -------------------------
     # Validation & SQL Generation
@@ -144,7 +144,7 @@ with col2:
         else:
             total_amount = sum([li['qty'] * li['unit_price'] for li in lines])
             
-            st.balloons()  # 🎉 Celebration effect
+            st.balloons()  
 
             st.success(f"Validation passed — total = ₹{total_amount:.2f}")
             
