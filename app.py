@@ -1,56 +1,46 @@
-# app.py - FastAPI backend example
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List
-from models import SessionLocal, Product, Order, OrderItem, InventoryLog
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from datetime import datetime
+from models import User
+from database import get_db
 
-app = FastAPI(title="Amba ERP API")
+SECRET_KEY = "super_secret_key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-class OrderLinePayload(BaseModel):
-    product_id: int
-    qty: int
-    unit_price: float
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-class OrderPayload(BaseModel):
-    order_number: str
-    customer_id: int
-    order_date: str
-    lines: List[OrderLinePayload]
-    created_by: str = "operator"
+app = FastAPI(
+    title="Amba ERP API",
+    description="ERP Backend with JWT authentication, Orders, Inventory, and Customers",
+    version="1.0.0"
+)
 
-@app.post("/api/v1/orders")
-def create_order(payload: OrderPayload):
-    db: Session = SessionLocal()
+def verify_password(plain, hashed): return pwd_context.verify(plain, hashed)
+def hash_password(p): return pwd_context.hash(p)
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    data.update({"exp": expire})
+    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+
+@app.post("/token")
+def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == form.username).first()
+    if not user or not verify_password(form.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_access_token({"sub": user.username})
+    return {"access_token": token, "token_type": "bearer"}
+
+@app.get("/users/me")
+def me(token: str = Depends(oauth2_scheme)):
     try:
-        with db.begin():
-            order = Order(order_number=payload.order_number,
-                          customer_id=payload.customer_id,
-                          order_date=payload.order_date,
-                          status='confirmed',
-                          total_amount=0.0,
-                          created_by=payload.created_by)
-            db.add(order)
-            db.flush()
-            total = 0.0
-            for line in payload.lines:
-                prod = db.query(Product).filter(Product.id == line.product_id).with_for_update().one_or_none()
-                if prod is None:
-                    raise HTTPException(status_code=400, detail=f"Product {line.product_id} not found")
-                if prod.current_stock < line.qty:
-                    raise HTTPException(status_code=409, detail=f"Insufficient stock for product {prod.id}")
-                prev = prod.current_stock
-                prod.current_stock -= line.qty
-                new = prod.current_stock
-                line_total = line.qty * line.unit_price
-                oi = OrderItem(order_id=order.id, product_id=prod.id, qty=line.qty, unit_price=line.unit_price, line_total=line_total)
-                db.add(oi)
-                il = InventoryLog(product_id=prod.id, change_qty=-line.qty, reason=f"order:{order.order_number}", prev_stock=prev, new_stock=new)
-                db.add(il)
-                total += line_total
-            order.total_amount = total
-            db.add(order)
-        return {"order_id": order.id, "order_number": order.order_number, "total_amount": order.total_amount}
-    finally:
-        db.close()
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return {"username": payload.get("sub")}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+s
