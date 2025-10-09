@@ -32,10 +32,15 @@ Clean, professional UI with two sections:
  Project Structure
 erp-prototype/
 │── app.py              # FastAPI app (authentication + order APIs)
+
 │── models.py           # SQLAlchemy models & database schema
+
 │── streamlit_app.py    # Streamlit frontend for ERP prototype
+
 │── management_report.xlsx  # Optional sample Excel data
+
 │── requirements.txt    # Dependencies
+
 │── README.md           # Project documentation
 
  Installation
