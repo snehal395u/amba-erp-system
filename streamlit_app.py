@@ -1,38 +1,22 @@
-# streamlit_app.py - Professional, colorful, and interactive ERP Prototype
+# streamlit_app.py - Professional ERP Prototype
 import streamlit as st
 import pandas as pd
 import datetime
 import os
 import uuid
 
-# -------------------------
-# Helper function for SQL escaping
-# -------------------------
 def sql_escape(val):
-    if val is None:
-        return "NULL"
-    if isinstance(val, (int, float)):
-        return str(val)
-    if isinstance(val, datetime.date):
-        return f"'{val.isoformat()}'"
+    if val is None: return "NULL"
+    if isinstance(val, (int, float)): return str(val)
+    if isinstance(val, datetime.date): return f"'{val.isoformat()}'"
     s = str(val).replace("'", "''")
     return f"'{s}'"
 
-# -------------------------
-# Page config
-# -------------------------
 st.set_page_config(page_title="ERP Prototype", layout="wide")
 
-# -------------------------
-# Title & Intro
-# -------------------------
 st.markdown("<h1 style='text-align:center;color:#4F81BD;'> ERP Prototype — Inventory & Orders</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;color:#6E6E6E;'>Professional ERP prototype with colorful UI and interactive order form.</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# -------------------------
-# Load Products
-# -------------------------
 EXCEL_PATH = "management_report.xlsx"
 if os.path.exists(EXCEL_PATH):
     try:
@@ -47,50 +31,25 @@ if df_products is None:
         {"id": 1, "sku": "LAM-001", "name": "Lamination A", "uom": "pcs", "current_stock": 120, "reorder_level": 20, "price": 50.0},
         {"id": 2, "sku": "LAM-002", "name": "Lamination B", "uom": "pcs", "current_stock": 45,  "reorder_level": 10, "price": 75.0},
         {"id": 3, "sku": "STAMP-01", "name": "Motor Stamp 1", "uom": "pcs", "current_stock": 300, "reorder_level": 50, "price": 12.5},
-        {"id": 4, "sku": "STAMP-02", "name": "Motor Stamp 2", "uom": "pcs", "current_stock": 5,   "reorder_level": 10, "price": 20.0},
     ])
 
 df_products['id'] = df_products['id'].astype(int)
 df_products['current_stock'] = df_products['current_stock'].astype(int)
 df_products['price'] = df_products['price'].astype(float)
 
-# -------------------------
-# Layout Columns
-# -------------------------
 col1, col2 = st.columns([2, 3])
 
-# -------------------------
 # Inventory Display
-# -------------------------
 with col1:
-    st.markdown("Inventory")
-    st.markdown("Inventory loaded from `management_report.xlsx` if present, otherwise sample data.")
-    
-    # Conditional formatting for stock levels
-    def highlight_stock(val, reorder):
-        color = "#D32F2F" if val <= reorder else "#388E3C"
-        return f'background-color: {color}; color:white; font-weight:bold;'
-    
-    st.dataframe(
-        df_products.style.apply(lambda x: [highlight_stock(v, x.reorder_level) if isinstance(v,int) else "" for v in x], axis=1)
-                 .format({"price": "₹{:.2f}"}), height=400
-    )
-    
-    # Metrics
-    total_skus = len(df_products)
-    total_stock = df_products['current_stock'].sum()
-    st.metric("Total SKUs", total_skus)
-    st.metric("Total Inventory Units", total_stock)
+    st.markdown("### Inventory")
+    st.dataframe(df_products)
 
-# -------------------------
 # Order Form
-# -------------------------
 with col2:
-    st.markdown("Create New Sales Order")
+    st.markdown("### Create New Sales Order")
     sample_customers = [
         {"id": 1, "name": "Amba Distributors"},
         {"id": 2, "name": "TransCo Pvt Ltd"},
-        {"id": 3, "name": "Electric Supplies Inc"}
     ]
     cust_options = {c['name']: c['id'] for c in sample_customers}
 
@@ -99,87 +58,41 @@ with col2:
         customer_name = st.selectbox("Customer", options=list(cust_options.keys()))
         order_date = st.date_input("Order Date", value=datetime.date.today())
         created_by = st.text_input("Created by", value="operator")
-        num_lines = st.number_input("Number of lines", min_value=1, max_value=10, value=1)
+        num_lines = st.number_input("Number of lines", min_value=1, max_value=5, value=1)
 
-        # Order lines
         lines = []
-        st.markdown("#### Order lines")
         for i in range(int(num_lines)):
             st.markdown(f"**Line {i+1}**")
-            col_a, col_b, col_c = st.columns([3, 1, 1])
+            col_a, col_b = st.columns([2, 2])
             with col_a:
                 product_choice = st.selectbox(f"Product (line {i+1})", options=df_products['name'].tolist(), key=f"prod_{i}")
-            with col_b:
                 qty = st.number_input(f"Qty (line {i+1})", min_value=1, value=1, key=f"qty_{i}")
-            with col_c:
-                price = float(df_products.loc[df_products['name'] == product_choice, 'price'].iloc[0])
-                st.markdown(f"Unit price: **₹{price:.2f}**")
-            prod_row = df_products[df_products['name'] == product_choice].iloc[0]
-            lines.append({
-                "product_id": int(prod_row['id']),
-                "product_name": product_choice,
-                "qty": int(qty),
-                "unit_price": float(price)
-            })
-
-        submitted = st.form_submit_button("Validate & Generate ")
-
-    # -------------------------
-    # Validation & SQL Generation
-    # -------------------------
-    if submitted:
-        errors = []
-        if not order_number.strip():
-            errors.append("Order number is required.")
-        if customer_name not in cust_options:
-            errors.append("Customer invalid.")
-        if len(lines) == 0:
-            errors.append("At least one order line required.")
-        for li in lines:
-            prod = df_products[df_products['id'] == li['product_id']].iloc[0]
-            if li['qty'] <= 0:
-                errors.append(f"Qty must be >0 for product {li['product_name']}.")
-        if errors:
-            st.error("Validation errors:\n- " + "\n- ".join(errors))
-        else:
-            total_amount = sum([li['qty'] * li['unit_price'] for li in lines])
-            
-            st.balloons()  
-
-            st.success(f"Validation passed — total = ₹{total_amount:.2f}")
-            
-            # Generate SQL statements
-            order_values = {
-                "order_number": order_number,
-                "customer_id": cust_options[customer_name],
-                "order_date": order_date,
-                "total_amount": total_amount,
-                "status": "confirmed",
-                "created_by": created_by
-            }
-
-            cols = ["order_number", "customer_id", "order_date", "total_amount", "status", "created_by"]
-            vals_sql = ", ".join([sql_escape(order_values[c]) for c in cols])
-            insert_order_sql = f"INSERT INTO orders ({', '.join(cols)}) VALUES ({vals_sql});"
-            st.markdown("### Generated SQL")
-            st.code(insert_order_sql)
-
-            st.markdown("#### Order lines inserts")
-            for li in lines:
-                li_cols = ["order_id", "product_id", "qty", "unit_price", "line_total"]
-                line_total = li['qty'] * li['unit_price']
-                li_vals = [
-                    "(SELECT id FROM orders WHERE order_number = " + sql_escape(order_number) + " LIMIT 1)",
-                    sql_escape(li['product_id']),
-                    sql_escape(li['qty']),
-                    sql_escape(li['unit_price']),
-                    sql_escape(line_total)
+            with col_b:
+                st.write("Enter up to 3 prices for same qty:")
+                prices = [
+                    st.number_input(f"Price 1 (line {i+1})", min_value=0.0, value=float(df_products.loc[df_products['name']==product_choice,'price'].iloc[0]), key=f"price1_{i}"),
+                    st.number_input(f"Price 2 (line {i+1})", min_value=0.0, value=0.0, key=f"price2_{i}"),
+                    st.number_input(f"Price 3 (line {i+1})", min_value=0.0, value=0.0, key=f"price3_{i}")
                 ]
-                sql_line = f"INSERT INTO order_items ({', '.join(li_cols)}) VALUES ({', '.join(li_vals)});"
-                st.code(sql_line)
 
-# -------------------------
-# Footer
-# -------------------------
-st.markdown("---")
-st.markdown("<p style='text-align:center;color:#6E6E6E;'>This prototype prints SQL only. In production, integrate with API & transactional DB.</p>", unsafe_allow_html=True)
+            prod_row = df_products[df_products['name'] == product_choice].iloc[0]
+            for price in [p for p in prices if p > 0]:
+                lines.append({
+                    "product_id": int(prod_row['id']),
+                    "product_name": product_choice,
+                    "qty": int(qty),
+                    "unit_price": float(price)
+                })
+
+        submitted = st.form_submit_button("Validate & Generate")
+
+    if submitted:
+        total_amount = sum([li['qty'] * li['unit_price'] for li in lines])
+        st.success(f"Validation passed — total = ₹{total_amount:.2f}")
+        st.markdown("### Generated SQL")
+        st.code(f"INSERT INTO orders (order_number, customer_id, order_date, total_amount, status, created_by) VALUES ({sql_escape(order_number)}, {cust_options[customer_name]}, {sql_escape(order_date)}, {total_amount}, 'confirmed', {sql_escape(created_by)});")
+        
+        for li in lines:
+            line_total = li['qty'] * li['unit_price']
+            sql_line = f"INSERT INTO order_items (order_id, product_id, qty, unit_price, line_total) VALUES ((SELECT id FROM orders WHERE order_number={sql_escape(order_number)}), {sql_escape(li['product_id'])}, {sql_escape(li['qty'])}, {sql_escape(li['unit_price'])}, {sql_escape(line_total)});"
+            st.code(sql_line)
