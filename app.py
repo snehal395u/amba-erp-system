@@ -1,192 +1,188 @@
-# app.py - FastAPI endpoints for auth and orders (prototype)
-from fastapi import FastAPI, HTTPException, Depends, Header
-from pydantic import BaseModel, condecimal
-from typing import List, Optional
-from models import SessionLocal, User, Product, Customer, Order, OrderItem, InventoryLog
-from datetime import date, datetime, timedelta
-import secrets
+# app.py - FastAPI backend for auth + orders (uses models.py)
+import os
+from datetime import datetime, timedelta
+from typing import List
 
-app = FastAPI(title="Amba ERP API (Prototype)")
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+import jwt
 
-# --- Simple in-memory token store (prototype only) ---
-TOKENS = {}  # token -> {"user_id": id, "expires": datetime}
+import models
+from models import SessionLocal, engine, User, Product, Customer, Order, OrderItem, InventoryLog
 
-def create_token(user_id: int):
-    token = secrets.token_urlsafe(24)
-    TOKENS[token] = {"user_id": user_id, "expires": datetime.utcnow() + timedelta(hours=8)}
-    return token
+# Setup
+models.Base.metadata.create_all(bind=engine)
+app = FastAPI(title="Amba ERP API")
 
-def verify_token(auth_header: Optional[str]):
-    if not auth_header:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
-    token = auth_header.split(" ", 1)[1]
-    record = TOKENS.get(token)
-    if not record:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    if record["expires"] < datetime.utcnow():
-        TOKENS.pop(token, None)
-        raise HTTPException(status_code=401, detail="Token expired")
-    return record["user_id"]
+# CONFIG - change in production via env vars
+SECRET_KEY = os.getenv("AMBA_SECRET_KEY", "change_this_secret_for_prod")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-# --- Pydantic schemas ---
-class LoginIn(BaseModel):
-    username: str
-    password: str
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# Pydantic schemas
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class ProductOut(BaseModel):
+    id: int
+    sku: str
+    name: str
+    current_stock: int
+    price: float
+
+    class Config:
+        orm_mode = True
+
+class CustomerOut(BaseModel):
+    id: int
+    name: str
+    class Config:
+        orm_mode = True
 
 class OrderLineIn(BaseModel):
     product_id: int
     qty: int
-    unit_price: condecimal(max_digits=14, decimal_places=2)
+    unit_price: float
 
-class OrderIn(BaseModel):
-    order_number: Optional[str] = None
+class OrderCreate(BaseModel):
+    order_number: str
     customer_id: int
-    order_date: Optional[date] = None
-    created_by: Optional[str] = "api_user"
+    order_date: datetime
+    created_by: str
     lines: List[OrderLineIn]
-
-class ProductOut(BaseModel):
-    id: int
-    sku: Optional[str]
-    name: str
-    uom: Optional[str]
-    current_stock: Optional[int]
-    reorder_level: Optional[int]
-    price: Optional[condecimal(max_digits=12, decimal_places=2)]
 
 class OrderOut(BaseModel):
     id: int
     order_number: str
-    customer_id: int
-    order_date: Optional[date]
     total_amount: float
     status: str
-    created_by: Optional[str]
+    class Config:
+        orm_mode = True
 
-# --- Auth endpoint ---
-@app.post("/auth/login")
-def login(payload: LoginIn):
-    session = SessionLocal()
+# Utility
+def get_db():
+    db = SessionLocal()
     try:
-        user = session.query(User).filter(User.username == payload.username).first()
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        # PROTOTYPE: compare plaintext; replace with proper hashing in prod
-        if payload.password != user.hashed_password:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        token = create_token(user.id)
-        return {"access_token": token, "token_type": "bearer"}
+        yield db
     finally:
-        session.close()
+        db.close()
 
-# --- Products / Customers endpoints ---
+def verify_password(plain, hashed):
+    return pwd_context.verify(plain, hashed)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid auth credentials")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token or expired")
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+# Seed a default admin (for demo)
+@app.on_event("startup")
+def seed_default_user():
+    db = SessionLocal()
+    if not db.query(User).filter(User.username == "admin").first():
+        admin = User(username="admin", hashed_password=get_password_hash("admin123"))
+        db.add(admin)
+        db.commit()
+    # add some sample customers & products if missing
+    if db.query(Customer).count() == 0:
+        db.add_all([Customer(name="Amba Distributors"), Customer(name="TransCo Pvt Ltd")])
+    if db.query(Product).count() == 0:
+        db.add_all([
+            Product(sku="LAM-001", name="Lamination A", uom="pcs", current_stock=120, reorder_level=20, price=50.0),
+            Product(sku="LAM-002", name="Lamination B", uom="pcs", current_stock=45, reorder_level=10, price=75.0),
+            Product(sku="STAMP-01", name="Motor Stamp 1", uom="pcs", current_stock=300, reorder_level=50, price=12.5),
+        ])
+    db.commit()
+    db.close()
+
+# Auth token endpoint
+@app.post("/token", response_model=Token)
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+    token = create_access_token({"sub": user.username})
+    return {"access_token": token, "token_type": "bearer"}
+
+# Public endpoints for products/customers
 @app.get("/products", response_model=List[ProductOut])
-def list_products():
-    session = SessionLocal()
-    try:
-        prods = session.query(Product).order_by(Product.id).all()
-        return prods
-    finally:
-        session.close()
+def list_products(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    products = db.query(Product).all()
+    return products
 
-@app.get("/customers")
-def list_customers():
-    session = SessionLocal()
-    try:
-        custs = session.query(Customer).order_by(Customer.id).all()
-        return [{"id": c.id, "name": c.name} for c in custs]
-    finally:
-        session.close()
+@app.get("/customers", response_model=List[CustomerOut])
+def list_customers(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Customer).all()
 
-# --- Orders endpoints ---
-@app.post("/orders", response_model=dict)
-def create_order(payload: OrderIn, authorization: Optional[str] = Header(None)):
-    user_id = verify_token(authorization)
-    session = SessionLocal()
-    try:
-        # build order number if not provided
-        order_number = payload.order_number or f"ORD-{date.today().strftime('%Y%m%d')}-{secrets.token_hex(3).upper()}"
-        order_date = payload.order_date or date.today()
-        total_amount = sum([float(l.qty) * float(l.unit_price) for l in payload.lines])
+# Create order
+@app.post("/orders", response_model=OrderOut)
+def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Basic validations
+    if db.query(Order).filter(Order.order_number == payload.order_number).first():
+        raise HTTPException(status_code=400, detail="Order number already exists")
+    cust = db.query(Customer).filter(Customer.id == payload.customer_id).first()
+    if not cust:
+        raise HTTPException(status_code=400, detail="Customer not found")
 
-        db_order = Order(
-            order_number=order_number,
-            customer_id=payload.customer_id,
-            order_date=order_date,
-            total_amount=total_amount,
-            status='confirmed',
-            created_by=payload.created_by
-        )
-        session.add(db_order)
-        session.flush()
+    total_amount = 0
+    for line in payload.lines:
+        prod = db.query(Product).filter(Product.id == line.product_id).first()
+        if not prod:
+            raise HTTPException(status_code=400, detail=f"Product id {line.product_id} not found")
+        if line.qty <= 0:
+            raise HTTPException(status_code=400, detail="Quantity must be > 0")
+        if line.qty > prod.current_stock:
+            raise HTTPException(status_code=400, detail=f"Not enough stock for product {prod.name} (available {prod.current_stock})")
+        total_amount += float(line.qty) * float(line.unit_price)
 
-        # Stock validation
-        required = {}
-        for l in payload.lines:
-            required.setdefault(l.product_id, 0)
-            required[l.product_id] += l.qty
-        # Check availability
-        for pid, rq in required.items():
-            prod = session.query(Product).filter(Product.id == pid).first()
-            if prod and (prod.current_stock is not None) and rq > prod.current_stock:
-                raise HTTPException(status_code=400, detail=f"Insufficient stock for product id {pid} (required {rq}, available {prod.current_stock})")
+    # create order
+    order = Order(order_number=payload.order_number, customer_id=payload.customer_id,
+                  order_date=payload.order_date.date(), total_amount=total_amount,
+                  status="confirmed", created_by=payload.created_by)
+    db.add(order)
+    db.flush()  # to get order.id
 
-        # Create order items & update stock/logs
-        for l in payload.lines:
-            line_total = float(l.qty) * float(l.unit_price)
-            oi = OrderItem(
-                order_id=db_order.id,
-                product_id=l.product_id,
-                qty=l.qty,
-                unit_price=l.unit_price,
-                line_total=line_total
-            )
-            session.add(oi)
+    # create order lines and update stock & inventory log
+    for line in payload.lines:
+        line_total = float(line.qty) * float(line.unit_price)
+        oi = OrderItem(order_id=order.id, product_id=line.product_id, qty=line.qty, unit_price=line.unit_price, line_total=line_total)
+        db.add(oi)
+        # update product stock
+        prod = db.query(Product).filter(Product.id == line.product_id).with_for_update().first()
+        prev_stock = prod.current_stock
+        prod.current_stock = prod.current_stock - line.qty
+        inv = InventoryLog(product_id=prod.id, change_qty=-line.qty, reason=f"Sale {order.order_number}", prev_stock=prev_stock, new_stock=prod.current_stock)
+        db.add(inv)
 
-            prod = session.query(Product).filter(Product.id == l.product_id).first()
-            if prod:
-                prev = prod.current_stock or 0
-                prod.current_stock = prev - l.qty
-                log = InventoryLog(
-                    product_id=prod.id,
-                    change_qty=-l.qty,
-                    reason=f"API Sales Order {order_number}",
-                    prev_stock=prev,
-                    new_stock=prod.current_stock
-                )
-                session.add(log)
+    db.commit()
+    db.refresh(order)
+    return order
 
-        session.commit()
-        return {"order_id": db_order.id, "order_number": order_number}
-    except HTTPException:
-        session.rollback()
-        raise
-    except Exception as e:
-        session.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
-
+# Simple read orders
 @app.get("/orders", response_model=List[OrderOut])
-def list_orders(authorization: Optional[str] = Header(None)):
-    user_id = verify_token(authorization)
-    session = SessionLocal()
-    try:
-        rows = session.query(Order).order_by(Order.id.desc()).all()
-        return rows
-    finally:
-        session.close()
-
-@app.get("/orders/{order_id}", response_model=OrderOut)
-def get_order(order_id: int, authorization: Optional[str] = Header(None)):
-    user_id = verify_token(authorization)
-    session = SessionLocal()
-    try:
-        o = session.query(Order).filter(Order.id == order_id).first()
-        if not o:
-            raise HTTPException(status_code=404, detail="Order not found")
-        return o
-    finally:
-        session.close()
+def list_orders(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Order).order_by(Order.id.desc()).all()
