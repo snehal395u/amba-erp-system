@@ -3,7 +3,7 @@ ERP Prototype — Inventory & Orders
 A lightweight ERP (Enterprise Resource Planning) prototype built with Streamlit, FastAPI, and SQLAlchemy.
 This system is designed for small-to-medium manufacturers to manage products, inventory, customers, and sales orders efficiently.
 
-* Features *
+ Features 
 
 User Authentication
 
