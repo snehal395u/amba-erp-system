@@ -1,4 +1,4 @@
-ERP Prototype — Inventory & Orders
+* ERP Prototype — Inventory & Orders
 
 A lightweight ERP (Enterprise Resource Planning) prototype built with Streamlit, FastAPI, and SQLAlchemy.
 This system is designed for small-to-medium manufacturers to manage products, inventory, customers, and sales orders efficiently.
@@ -31,17 +31,17 @@ Clean, professional UI with two sections:
 
  Project Structure
 erp-prototype/
-│── app.py              # FastAPI app (authentication + order APIs)
+── app.py              # FastAPI app (authentication + order APIs)
 
-│── models.py           # SQLAlchemy models & database schema
+── models.py           # SQLAlchemy models & database schema
 
-│── streamlit_app.py    # Streamlit frontend for ERP prototype
+── streamlit_app.py    # Streamlit frontend for ERP prototype
 
-│── management_report.xlsx  # Optional sample Excel data
+── management_report.xlsx  # Optional sample Excel data
 
-│── requirements.txt    # Dependencies
+── requirements.txt    # Dependencies
 
-│── README.md           # Project documentation
+── README.md           # Project documentation
 
  Installation
 
