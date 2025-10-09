@@ -1,7 +1,7 @@
-# models.py - SQLAlchemy models (SQLite by default for local testing)
+# models.py - SQLAlchemy models (SQLite default for local testing)
 from sqlalchemy import Column, Integer, String, Numeric, Date, Text, ForeignKey, create_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker
 from datetime import date
 
 DATABASE_URL = "sqlite:///./amba_erp.db"
@@ -9,6 +9,12 @@ DATABASE_URL = "sqlite:///./amba_erp.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(255), unique=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
 
 class Customer(Base):
     __tablename__ = 'customers'
